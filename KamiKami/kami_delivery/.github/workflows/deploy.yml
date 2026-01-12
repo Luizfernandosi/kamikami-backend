@@ -1,0 +1,31 @@
+name: Deploy do Delivery no Firebase
+
+on:
+  push:
+    branches:
+      - main  # O robô só trabalha quando você envia para a branch principal
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixando o código do GitHub
+        uses: actions/checkout@v3
+
+      - name: Instalando o Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Construindo a versão Web
+        run: |
+          flutter pub get
+          flutter build web
+
+      - name: Enviando para o Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KAMI_DELIVERY }}'
+          projectId: seu-id-do-projeto-aqui
+          channelId: live
