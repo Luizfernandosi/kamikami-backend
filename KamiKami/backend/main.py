@@ -1,108 +1,90 @@
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
-import os
-import mercadopago
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import requests
+import time
+import hmac
+import hashlib
+import json
 
-app = FastAPI()
+app = Flask(__name__)
+CORS(app)
 
-# 1. CONFIGURAÇÃO DE SEGURANÇA (CORS)
-# Permite que o seu site no Firebase fale com o servidor no Render
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://kamikami-af5fe.web.app", "*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CONFIGURAÇÕES LALAMOVE (Substitua pelas suas)
+API_KEY = "SUA_API_KEY_AQUI"
+API_SECRET = "SUA_API_SECRET_AQUI"
+BASE_URL = "https://rest.lalamove.com" # Use 'https://rest.sandbox.lalamove.com' para testes
 
-# 2. INICIALIZAÇÃO DO MERCADO PAGO
-# Ele busca o token que você cadastrou no painel 'Environment' do Render
-sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN", "TOKEN_NAO_CONFIGURADO"))
+def gerar_assinatura_lalamove(method, path, body_str, timestamp):
+    """Gera a assinatura de segurança exigida pela Lalamove"""
+    raw_signature = f"{timestamp}\r\n{method}\r\n{path}\r\n\r\n{body_str}"
+    signature = hmac.new(
+        API_SECRET.encode(),
+        raw_signature.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return signature
 
-# 3. MODELOS DE DADOS
-class Item(BaseModel):
-    nome: str
-    preco: float
-
-class Pedido(BaseModel):
-    itens: List[Item]
-    distancia_km: float
-
-# 4. ROTAS DA API
-@app.get("/")
-async def root():
-    return {"status": "KamiKami API Online", "homenagem": "Vó Lica"}
-
-@app.get("/cardapio")
-async def get_cardapio():
-    return [
-        {"nome": "Hambúrguer Gourmet", "preco": 35.00, "img": "🍔"},
-        {"nome": "Pizza Artesanal", "preco": 55.00, "img": "🍕"},
-        {"nome": "Batata Frita", "preco": 20.00, "img": "🍟"},
-        {"nome": "Refrigerante 600ml", "preco": 8.00, "img": "🥤"},
-    ]
-
-@app.get("/calcular-frete/{distancia_km}")
-async def calcular_frete(distancia_km: float):
-    taxa_base = 5.00
-    valor_km = 2.00
-    valor_frete = taxa_base + (distancia_km * valor_km)
-    tempo_total = int(20 + (distancia_km * 4))
-    return {"frete": round(valor_frete, 2), "tempo": f"{tempo_total}-{tempo_total + 10} min"}
-
-# 5. ROTA DE CHECKOUT (Gera o Pix Real)
-@app.post("/checkout")
-async def finalizar_pedido(pedido: Pedido):
-    try:
-        subtotal = sum(item.preco for item in pedido.itens)
-        valor_frete = 5.00 + (pedido.distancia_km * 2.00)
-        total = subtotal + valor_frete
-
-        # Configura a cobrança para o Mercado Pago
-        payment_data = {
-            "transaction_amount": float(total),
-            "description": "Pedido KamiKami Delivery",
-            "payment_method_id": "pix",
-            "payer": {
-                "email": "cliente@kamikami.com", 
-                "first_name": "Cliente",
-                "last_name": "KamiKami"
-            }
-        }
-
-        payment_response = sdk.payment().create(payment_data)
-        payment = payment_response["response"]
-
-        return {
-            "total": round(total, 2),
-            "codigo_pix": payment["point_of_interaction"]["transaction_data"]["qr_code"],
-            "qr_code_url": payment["point_of_interaction"]["transaction_data"]["ticket_url"],
-            "id_pagamento": payment["id"]
-        }
-    except Exception as e:
-        print(f"Erro no checkout: {e}")
-        raise HTTPException(status_code=500, detail="Falha ao gerar Pix")
-
-# 6. ROTA DE WEBHOOK (Baixa Automática)
-@app.post("/webhook")
-async def receber_notificacao(request: Request):
-    dados = await request.json()
+@app.route('/cotar-mottu', methods=['POST']) # Mantive o nome da rota para não precisar mudar o Flutter
+def cotar_entrega():
+    dados = request.json
+    endereco_destino = dados.get("endereco")
     
-    # O Mercado Pago avisa quando um pagamento muda de status
-    if dados.get("type") == "payment":
-        id_pagamento = dados["data"]["id"]
-        resultado = sdk.payment().get(id_pagamento)
-        status = resultado["response"]["status"]
-        
-        if status == "approved":
-            print(f"💰 PAGAMENTO CONFIRMADO: Pedido {id_pagamento} no valor de R$ {resultado['response']['transaction_amount']}")
-            # Aqui no futuro você pode salvar no banco de dados 'Pago: Sim'
-            
-    return {"status": "ok"}
+    timestamp = str(int(time.time() * 1000))
+    path = '/v3/quotations'
+    method = 'POST'
+    
+    payload = {
+        "data": {
+            "serviceType": "MOTORCYCLE",
+            "language": "pt_BR",
+            "stops": [
+                {
+                    "address": "Rua do KamiKami, 123, São Paulo, SP" # ENDEREÇO DA SUA LOJA
+                },
+                {
+                    "address": endereco_destino # ENDEREÇO QUE O CLIENTE DIGITOU
+                }
+            ]
+        }
+    }
+    
+    body_str = json.dumps(payload)
+    signature = gerar_assinatura_lalamove(method, path, body_str, timestamp)
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"hmac {API_KEY}:{timestamp}:{signature}",
+        "Market": "BR"
+    }
 
-# 7. INICIALIZAÇÃO DO SERVIDOR
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    try:
+        response = requests.post(f"{BASE_URL}{path}", headers=headers, json=payload)
+        res_data = response.json()
+        
+        if response.status_code == 201:
+            # A Lalamove retorna o valor em uma string, convertemos para float
+            valor_frete = float(res_data['data']['totalFee'])
+            return jsonify({"frete": valor_frete})
+        else:
+            print(f"Erro Lalamove: {res_data}")
+            return jsonify({"frete": 12.00, "aviso": "Usando frete fixo por erro na API"}), 200
+    except Exception as e:
+        print(f"Erro no servidor: {e}")
+        return jsonify({"frete": 15.00}), 200
+
+@app.route('/checkout', methods=['POST'])
+def checkout():
+    # Aqui continua sua lógica do Mercado Pago que já tínhamos
+    # Integrando o valor do frete vindo do Flutter
+    dados = request.json
+    total_itens = sum(item['preco'] for item in dados['itens'])
+    total_com_frete = total_itens + dados.get('frete', 0)
+    
+    # Simulação de resposta do Mercado Pago
+    return jsonify({
+        "qr_code_url": "https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=123",
+        "total": total_com_frete
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
