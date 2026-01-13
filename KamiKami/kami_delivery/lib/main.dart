@@ -1,7 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_places_flutter/google_places_flutter.dart';
-import 'package:google_places_flutter/model/prediction.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:url_launcher/url_launcher.dart';
@@ -17,14 +14,13 @@ class AppCliente extends StatefulWidget {
 class _AppClienteState extends State<AppCliente> {
   Map<String, Map<String, dynamic>> carrinhoMap = {};
   double frete = 0.00;
+  double taxaFixa = 7.00; // ALTERE AQUI O VALOR DA SUA ENTREGA PRÓPRIA
   TextEditingController enderecoController = TextEditingController();
   bool enderecoValidado = false;
   
-  // CONFIGURAÇÕES GERAIS
   final Color corLaranja = const Color(0xFFFF944D); 
   final Color corPreta = const Color(0xFF1A1A1A);
   final String urlBase = "https://kamikami-backend.onrender.com";
-  final String googleApiKey = "AIzaSyD6Ajve0QZkljEZ0387rQLBxNh8-BpnZPU"; // Sua Chave Google
 
   double get total {
     double subtotal = 0;
@@ -32,7 +28,7 @@ class _AppClienteState extends State<AppCliente> {
       double preco = double.parse(value['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'));
       subtotal += preco * value['qtd'];
     });
-    return subtotal + frete;
+    return subtotal + (enderecoValidado ? frete : 0);
   }
 
   void adicionarAoCarrinho(String nome, String preco) {
@@ -57,23 +53,13 @@ class _AppClienteState extends State<AppCliente> {
     });
   }
 
-  // CHAMADA PARA O BACKEND (LALAMOVE)
-  Future<void> validarEnderecoLalamove(String endereco, StateSetter setModalState) async {
-    setModalState(() => enderecoValidado = false);
-    try {
-      final response = await http.post(
-        Uri.parse('$urlBase/cotar-mottu'), // Rota mantida conforme main.py
-        headers: {"Content-Type": "application/json"},
-        body: json.encode({"endereco": endereco}),
-      );
-      if (response.statusCode == 200) {
-        var dados = json.decode(response.body);
-        setState(() => frete = dados['frete'].toDouble());
-        setModalState(() => enderecoValidado = true);
-      }
-    } catch (e) {
-      setState(() => frete = 12.00); 
+  // Validação para Entrega Própria
+  void validarEnderecoProprio(String endereco, StateSetter setModalState) {
+    if (endereco.length > 10) {
+      setState(() => frete = taxaFixa);
       setModalState(() => enderecoValidado = true);
+    } else {
+      setModalState(() => enderecoValidado = false);
     }
   }
 
@@ -95,41 +81,23 @@ class _AppClienteState extends State<AppCliente> {
                 const Text("FINALIZAR PAGAMENTO", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const Divider(),
                 const SizedBox(height: 15),
-                
-                // AUTOCOMPLETE DO GOOGLE PLACES
-                GooglePlaceAutoCompleteTextField(
-                  textEditingController: enderecoController,
-                  googleAPIKey: googleApiKey,
-                  inputDecoration: InputDecoration(
-                    labelText: "Digite seu endereço completo",
-                    prefixIcon: const Icon(Icons.search, color: Colors.orange),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.map, color: Colors.blue),
-                      onPressed: () async {
-                        LatLng? result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => const TelaSelecaoMapa()),
-                        );
-                        if (result != null) {
-                          // Simula endereço por coordenadas ou chama Geocoding aqui
-                          enderecoController.text = "Localização via Mapa";
-                          validarEnderecoLalamove("Lat: ${result.latitude}, Lng: ${result.longitude}", setModalState);
-                        }
-                      },
+                TextField(
+                  controller: enderecoController,
+                  onChanged: (val) => validarEnderecoProprio(val, setModalState),
+                  decoration: InputDecoration(
+                    labelText: "Seu Endereço Completo",
+                    hintText: "Rua, Número, Bairro",
+                    prefixIcon: const Icon(Icons.location_on, color: Colors.red),
+                    suffixIcon: Icon(
+                      enderecoValidado ? Icons.check_circle : Icons.error_outline,
+                      color: enderecoValidado ? Colors.green : Colors.grey,
                     ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  countries: const ["br"],
-                  isReadyOTP: true,
-                  itemClick: (Prediction prediction) {
-                    enderecoController.text = prediction.description!;
-                    validarEnderecoLalamove(prediction.description!, setModalState);
-                  },
                 ),
-                
                 const SizedBox(height: 20),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Subtotal:"), Text("R\$ ${(total - frete).toStringAsFixed(2)}")]),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Entrega (Lalamove):"), Text("R\$ ${frete.toStringAsFixed(2)}", style: const TextStyle(color: Colors.blue))]),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Subtotal:"), Text("R\$ ${(total - (enderecoValidado ? frete : 0)).toStringAsFixed(2)}")]),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Taxa de Entrega:"), Text("R\$ ${frete.toStringAsFixed(2)}", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold))]),
                 const Divider(),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("TOTAL:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), Text("R\$ ${total.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.green))]),
                 const SizedBox(height: 20),
@@ -142,6 +110,8 @@ class _AppClienteState extends State<AppCliente> {
                   onPressed: enderecoValidado ? () => processarCheckoutReal() : null,
                   child: const Text("PAGAR COM MERCADO PAGO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
+                const SizedBox(height: 10),
+                const Text("Sua entrega será feita por nossa equipe própria.", style: TextStyle(fontSize: 11, color: Colors.grey)),
               ],
             ),
           );
@@ -154,18 +124,33 @@ class _AppClienteState extends State<AppCliente> {
     List itens = [];
     carrinhoMap.forEach((k, v) => itens.add({"nome": k, "preco": double.parse(v['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'))}));
     
-    final response = await http.post(
-      Uri.parse('$urlBase/checkout'),
-      headers: {"Content-Type": "application/json"},
-      body: json.encode({"itens": itens, "endereco": enderecoController.text, "frete": frete}),
-    );
-    
-    if (response.statusCode == 200) {
-      var dados = json.decode(response.body);
-      await launchUrl(Uri.parse(dados['qr_code_url']), mode: LaunchMode.externalApplication);
+    try {
+      final response = await http.post(
+        Uri.parse('$urlBase/checkout'),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({
+          "itens": itens, 
+          "endereco": enderecoController.text, 
+          "frete": frete,
+          "entrega_propria": true
+        }),
+      );
       
-      if (!mounted) return;
-      Navigator.push(context, MaterialPageRoute(builder: (context) => PaginaStatus(endereco: enderecoController.text, total: total)));
+      if (response.statusCode == 200) {
+        var dados = json.decode(response.body);
+        await launchUrl(Uri.parse(dados['qr_code_url']), mode: LaunchMode.externalApplication);
+        
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => PaginaStatus(
+            endereco: enderecoController.text,
+            total: total,
+          )),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erro ao processar pedido. Tente novamente.")));
     }
   }
 
@@ -211,7 +196,7 @@ class _AppClienteState extends State<AppCliente> {
   Widget containerResumoNovo() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey[300]!, width: 3)), boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10)]),
+      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey[300]!, width: 3)), boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 10)]),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -229,42 +214,6 @@ class _AppClienteState extends State<AppCliente> {
   }
 }
 
-// TELA DO MAPA PARA O PIN
-class TelaSelecaoMapa extends StatefulWidget {
-  const TelaSelecaoMapa({super.key});
-  @override
-  _TelaSelecaoMapaState createState() => _TelaSelecaoMapaState();
-}
-
-class _TelaSelecaoMapaState extends State<TelaSelecaoMapa> {
-  LatLng _posicaoAtual = const LatLng(-23.7025, -46.7562); 
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("Arraste o mapa sob o Pin"), backgroundColor: const Color(0xFF1A1A1A)),
-      body: Stack(
-        children: [
-          GoogleMap(
-            initialCameraPosition: CameraPosition(target: _posicaoAtual, zoom: 16),
-            onCameraMove: (position) => _posicaoAtual = position.target,
-          ),
-          const Center(child: Icon(Icons.location_on, size: 50, color: Colors.red)),
-        ],
-      ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(20),
-        child: ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(double.infinity, 50)),
-          onPressed: () => Navigator.pop(context, _posicaoAtual),
-          child: const Text("CONFIRMAR LOCAL NO PIN", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        ),
-      ),
-    );
-  }
-}
-
-// PÁGINA DE STATUS
 class PaginaStatus extends StatelessWidget {
   final String endereco;
   final double total;
@@ -272,7 +221,7 @@ class PaginaStatus extends StatelessWidget {
 
   void abrirSuporteWhatsapp() {
     String mensagem = "Olá! Preciso de ajuda com meu pedido no KamiKami. Endereço: $endereco";
-    String url = "https://wa.me/5511999999999?text=${Uri.encodeComponent(mensagem)}";
+    String url = "https://wa.me/5511999999999?text=${Uri.encodeComponent(mensagem)}"; // COLOQUE SEU NUMERO AQUI
     launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
@@ -288,23 +237,26 @@ class PaginaStatus extends StatelessWidget {
             const Icon(Icons.check_circle, color: Colors.green, size: 70),
             const SizedBox(height: 10),
             const Text("PEDIDO CONFIRMADO!", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const Text("Estamos preparando seu Yakissoba.", textAlign: TextAlign.center),
+            const Text("Seu Yakissoba já entrou em produção!", textAlign: TextAlign.center),
             const SizedBox(height: 30),
             statusRow(Icons.receipt_long, "Pedido Recebido", true),
-            statusRow(Icons.restaurant, "Cozinhando", true),
-            statusRow(Icons.moped, "Aguardando Entregador", false),
+            statusRow(Icons.restaurant, "Preparando na Cozinha", true),
+            statusRow(Icons.moped, "Saiu para entrega (Equipe Própria)", false),
+            statusRow(Icons.home, "Entregue", false),
             const Divider(height: 40),
+            const Text("DÚVIDAS SOBRE A ENTREGA?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 15),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(double.infinity, 55)),
               icon: const Icon(Icons.chat, color: Colors.white),
-              label: const Text("SUPORTE WHATSAPP", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              label: const Text("CHAMAR NO WHATSAPP", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               onPressed: abrirSuporteWhatsapp,
             ),
             const SizedBox(height: 10),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFFF944D), width: 2), minimumSize: const Size(double.infinity, 55)),
               icon: const Icon(Icons.camera_alt, color: Color(0xFFFF944D)),
-              label: const Text("INSTAGRAM @KAMIKAMI", style: TextStyle(color: Color(0xFFFF944D), fontWeight: FontWeight.bold)),
+              label: const Text("VER NOSSO INSTAGRAM", style: TextStyle(color: Color(0xFFFF944D), fontWeight: FontWeight.bold)),
               onPressed: () => launchUrl(Uri.parse("https://instagram.com/kamikamiyakissoba")),
             ),
           ],
@@ -320,8 +272,7 @@ class PaginaStatus extends StatelessWidget {
         children: [
           CircleAvatar(backgroundColor: concluido ? Colors.green.withOpacity(0.2) : Colors.grey[200], child: Icon(icon, color: concluido ? Colors.green : Colors.grey, size: 20)),
           const SizedBox(width: 15),
-          Text(texto, style: TextStyle(fontWeight: concluido ? FontWeight.bold : FontWeight.normal, color: concluido ? Colors.black : Colors.grey)),
-          const Spacer(),
+          Expanded(child: Text(texto, style: TextStyle(fontWeight: concluido ? FontWeight.bold : FontWeight.normal, color: concluido ? Colors.black : Colors.grey, fontSize: 15))),
           if (concluido) const Icon(Icons.check_circle, color: Colors.green, size: 20)
         ],
       ),
