@@ -17,64 +17,76 @@ class _AppClienteState extends State<AppCliente> {
   double frete = 0.00;
   String tempoEntrega = "Calculando...";
   
-  // URL OFICIAL DO SEU BACKEND NO RENDER
+  // URL DO SEU BACKEND NO RENDER
   final String urlBase = "https://kamikami-backend.onrender.com";
 
-  // 1. Lógica de Localização e Frete
   Future<void> calcularFreteAutomatico() async {
-    LocationPermission permission = await Geolocator.requestPermission();
-    if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
-      Position position = await Geolocator.getCurrentPosition();
-      
-      // Coordenadas fictícias do restaurante (ajuste conforme necessário)
-      double distanciaKM = Geolocator.distanceBetween(-23.5505, -46.6333, position.latitude, position.longitude) / 1000;
+    try {
+      LocationPermission permission = await Geolocator.requestPermission();
+      Position? position;
 
-      try {
-        // CORREÇÃO: Usando a URL oficial do Render e a rota correta
-        final response = await http.get(Uri.parse('$urlBase/calcular-frete/${distanciaKM.toStringAsFixed(2)}'));
-        
-        if (response.statusCode == 200) {
-          var dados = json.decode(response.body);
-          setState(() {
-            frete = dados['frete'].toDouble();
-            tempoEntrega = dados['tempo'];
-          });
-        }
-      } catch (e) {
-        debugPrint("Erro ao ligar para o Render: $e");
-        setState(() => tempoEntrega = "Erro ao calcular");
+      if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
+        position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.low,
+          timeLimit: const Duration(seconds: 5),
+        ).catchError((e) => null); 
       }
+      
+      // Ajuste as coordenadas abaixo para o endereço real do seu restaurante
+      double distanciaKM = (position != null) 
+          ? Geolocator.distanceBetween(-23.5505, -46.6333, position.latitude, position.longitude) / 1000
+          : 5.0;
+
+      final response = await http.get(
+        Uri.parse('$urlBase/calcular-frete/${distanciaKM.toStringAsFixed(2)}')
+      ).timeout(const Duration(seconds: 15));
+      
+      if (response.statusCode == 200) {
+        var dados = json.decode(response.body);
+        setState(() {
+          frete = dados['frete'].toDouble();
+          tempoEntrega = dados['tempo'];
+        });
+      }
+    } catch (e) {
+      setState(() {
+        frete = 10.00;
+        tempoEntrega = "30-45 min (Aprox.)";
+      });
     }
   }
 
   double get total => carrinho.fold(0.0, (sum, item) => sum + double.parse(item['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'))) + frete;
 
-  // 2. Lógica de Checkout (Gera Pix no Render)
-  Future<void> processarCheckoutPix() async {
+  // CHECKOUT PRO: Integração com múltiplas formas de pagamento
+  Future<void> processarCheckout() async {
     showDialog(context: context, builder: (context) => const Center(child: CircularProgressIndicator()));
 
     try {
-      Position pos = await Geolocator.getCurrentPosition();
-      double km = Geolocator.distanceBetween(-23.5505, -46.6333, pos.latitude, pos.longitude) / 1000;
+      double km = 5.0;
+      try {
+        Position? pos = await Geolocator.getCurrentPosition(timeLimit: const Duration(seconds: 4)).catchError((e) => null);
+        if (pos != null) km = Geolocator.distanceBetween(-23.5505, -46.6333, pos.latitude, pos.longitude) / 1000;
+      } catch (_) {}
       
       List itens = carrinho.map((i) => {
         "nome": i['nome'], 
         "preco": double.parse(i['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'))
       }).toList();
 
-      // CORREÇÃO: Enviando para a rota /checkout correta no Render
       final response = await http.post(
         Uri.parse('$urlBase/checkout'),
         headers: {"Content-Type": "application/json"},
         body: json.encode({"itens": itens, "distancia_km": km}),
-      );
+      ).timeout(const Duration(seconds: 25));
 
       if (!mounted) return;
-      Navigator.pop(context); // Fecha o loading
+      Navigator.pop(context); 
 
       if (response.statusCode == 200) {
         var dados = json.decode(response.body);
-        exibirModalPix(dados['codigo_pix'], dados['qr_code_url'], dados['total'].toDouble());
+        // Agora recebemos o link da preferência (init_point) do Mercado Pago
+        exibirModalPagamento(dados['qr_code_url'], dados['total'].toDouble());
       }
     } catch (e) {
       if (mounted) Navigator.pop(context);
@@ -82,43 +94,37 @@ class _AppClienteState extends State<AppCliente> {
     }
   }
 
-  // 3. Modal do Pix e WhatsApp
-  void exibirModalPix(String codigo, String urlQr, double totalFinal) {
+  void exibirModalPagamento(String urlPagamento, double totalFinal) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => Padding(
+      builder: (ctx) => Container(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text("Pagamento via Pix", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Icon(Icons.payment, size: 50, color: Colors.blue),
+            const Text("Finalizar Pedido", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            Image.network(urlQr, height: 200),
-            const SizedBox(height: 16),
-            const Text("Copia e Cola:", style: TextStyle(fontWeight: FontWeight.bold)),
-            SelectableText(codigo, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
+            const Text("Escolha como pagar (Pix, Cartão ou Boleto):", textAlign: TextAlign.center),
             const SizedBox(height: 24),
-            Text("Total: R\$ ${totalFinal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, color: Colors.green, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-              onPressed: () => enviarWhatsApp(totalFinal, codigo),
-              child: const Text("Paguei! Enviar Comprovante", style: TextStyle(color: Colors.white)),
-            )
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue, 
+                minimumSize: const Size(double.infinity, 55),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+              ),
+              onPressed: () => launchUrl(Uri.parse(urlPagamento), mode: LaunchMode.externalApplication),
+              child: const Text("PAGAR COM MERCADO PAGO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 16),
+            Text("Total: R\$ ${totalFinal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, color: Colors.green, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            const Text("Ambiente Seguro Mercado Pago", style: TextStyle(fontSize: 10, color: Colors.grey)),
           ],
         ),
       ),
     );
-  }
-
-  void enviarWhatsApp(double total, String pix) async {
-    // Altere para o seu número real com DDD
-    String msg = Uri.encodeComponent("*Novo Pedido KamiKami*\nTotal: R\$ ${total.toStringAsFixed(2)}\nPix: $pix");
-    var url = Uri.parse("https://wa.me/5511999999999?text=$msg"); 
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    }
   }
 
   @override
@@ -163,8 +169,8 @@ class _AppClienteState extends State<AppCliente> {
         const SizedBox(height: 10),
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(double.infinity, 50)), 
-          onPressed: () => processarCheckoutPix(), 
-          child: const Text("FECHAR PEDIDO", style: TextStyle(color: Colors.white))
+          onPressed: () => processarCheckout(), 
+          child: const Text("FECHAR PEDIDO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
         )
       ]),
     );
