@@ -16,17 +16,23 @@ class _AppClienteState extends State<AppCliente> {
   List carrinho = [];
   double frete = 0.00;
   String tempoEntrega = "Calculando...";
+  
+  // URL OFICIAL DO SEU BACKEND NO RENDER
+  final String urlBase = "https://kamikami-backend.onrender.com";
 
   // 1. Lógica de Localização e Frete
   Future<void> calcularFreteAutomatico() async {
     LocationPermission permission = await Geolocator.requestPermission();
     if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
       Position position = await Geolocator.getCurrentPosition();
+      
       // Coordenadas fictícias do restaurante (ajuste conforme necessário)
       double distanciaKM = Geolocator.distanceBetween(-23.5505, -46.6333, position.latitude, position.longitude) / 1000;
 
       try {
-        final response = await http.get(Uri.parse('http://127.0.0.1:8000/calcular-frete/${distanciaKM.toStringAsFixed(2)}'));
+        // CORREÇÃO: Usando a URL oficial do Render e a rota correta
+        final response = await http.get(Uri.parse('$urlBase/calcular-frete/${distanciaKM.toStringAsFixed(2)}'));
+        
         if (response.statusCode == 200) {
           var dados = json.decode(response.body);
           setState(() {
@@ -35,15 +41,15 @@ class _AppClienteState extends State<AppCliente> {
           });
         }
       } catch (e) {
-        debugPrint("Erro ao ligar para o Python: $e");
+        debugPrint("Erro ao ligar para o Render: $e");
+        setState(() => tempoEntrega = "Erro ao calcular");
       }
     }
   }
 
-  // CORREÇÃO AQUI: Mudança de 0 para 0.0 para garantir que o retorno seja double
   double get total => carrinho.fold(0.0, (sum, item) => sum + double.parse(item['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'))) + frete;
 
-  // 2. Lógica de Checkout (Gera Pix no Python)
+  // 2. Lógica de Checkout (Gera Pix no Render)
   Future<void> processarCheckoutPix() async {
     showDialog(context: context, builder: (context) => const Center(child: CircularProgressIndicator()));
 
@@ -56,17 +62,19 @@ class _AppClienteState extends State<AppCliente> {
         "preco": double.parse(i['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'))
       }).toList();
 
+      // CORREÇÃO: Enviando para a rota /checkout correta no Render
       final response = await http.post(
-        Uri.parse('http://127.0.0.1:8000/checkout'),
+        Uri.parse('$urlBase/checkout'),
         headers: {"Content-Type": "application/json"},
         body: json.encode({"itens": itens, "distancia_km": km}),
       );
 
+      if (!mounted) return;
       Navigator.pop(context); // Fecha o loading
 
       if (response.statusCode == 200) {
         var dados = json.decode(response.body);
-        exibirModalPix(dados['codigo_pix'], dados['qr_code_url'], dados['total']);
+        exibirModalPix(dados['codigo_pix'], dados['qr_code_url'], dados['total'].toDouble());
       }
     } catch (e) {
       if (mounted) Navigator.pop(context);
@@ -105,8 +113,9 @@ class _AppClienteState extends State<AppCliente> {
   }
 
   void enviarWhatsApp(double total, String pix) async {
+    // Altere para o seu número real com DDD
     String msg = Uri.encodeComponent("*Novo Pedido KamiKami*\nTotal: R\$ ${total.toStringAsFixed(2)}\nPix: $pix");
-    var url = Uri.parse("https://wa.me/5511999999999?text=$msg"); // Altere para seu número real
+    var url = Uri.parse("https://wa.me/5511999999999?text=$msg"); 
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     }
