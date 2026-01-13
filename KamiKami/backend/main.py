@@ -1,26 +1,25 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
 import uuid
-import os  # Necessário para ler a porta do servidor na nuvem
+import os
+import mercadopago
 
 app = FastAPI()
 
-# 1. Configuração de CORS Atualizada
-# Isso permite que o seu link do Firebase acesse os dados do Python com segurança
+# Configuração de CORS para o seu link do Firebase
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost",
-        "https://kamikami-af5fe.web.app", # Seu link oficial
-        "*" # Mantido para testes, mas o link acima é o principal
-    ],
+    allow_origins=["https://kamikami-af5fe.web.app", "*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Modelos de Dados
+# Inicializa o Mercado Pago usando a variável que você salvou no Render
+# Certifique-se de que a chave no Render seja: MP_ACCESS_TOKEN
+sdk = mercadopago.SDK(os.environ.get("MP_ACCESS_TOKEN", "TOKEN_NAO_CONFIGURADO"))
+
 class Item(BaseModel):
     nome: str
     preco: float
@@ -29,12 +28,10 @@ class Pedido(BaseModel):
     itens: List[Item]
     distancia_km: float
 
-# Rota de Boas-vindas (para testar se a API está viva)
 @app.get("/")
 async def root():
-    return {"status": "KamiKami API Online", "memoria": "Homenagem à Vó Lica"}
+    return {"status": "KamiKami API Online", "integracao": "Mercado Pago Ativo"}
 
-# 2. Rota do Cardápio
 @app.get("/cardapio")
 async def get_cardapio():
     return [
@@ -44,43 +41,52 @@ async def get_cardapio():
         {"nome": "Refrigerante 600ml", "preco": 8.00, "img": "🥤"},
     ]
 
-# 3. Rota de Cálculo de Frete e Tempo
 @app.get("/calcular-frete/{distancia_km}")
 async def calcular_frete(distancia_km: float):
     taxa_base = 5.00
     valor_km = 2.00
     valor_frete = taxa_base + (distancia_km * valor_km)
-    
-    tempo_preparo = 20
-    tempo_total = int(tempo_preparo + (distancia_km * 4))
-    
-    return {
-        "frete": round(valor_frete, 2),
-        "tempo": f"{tempo_total}-{tempo_total + 10} min"
-    }
+    tempo_total = int(20 + (distancia_km * 4))
+    return {"frete": round(valor_frete, 2), "tempo": f"{tempo_total}-{tempo_total + 10} min"}
 
-# 4. Rota de Checkout e Geração de Pix
+# ROTA DE CHECKOUT ATUALIZADA (Gera Pix Real)
 @app.post("/checkout")
 async def finalizar_pedido(pedido: Pedido):
-    subtotal = sum(item.preco for item in pedido.itens)
-    valor_frete = 5.00 + (pedido.distancia_km * 2.00)
-    total = subtotal + valor_frete
-    
-    id_transacao = str(uuid.uuid4()).replace("-", "")[:10]
-    pix_copia_e_cola = f"00020101021226850014BR.GOV.BCB.PIX0123kami{id_transacao}520400005303986540{total:.2f}5802BR5915KamiKami_Deliv6009SAO_PAULO62070503***6304"
-    
-    return {
-        "subtotal": round(subtotal, 2),
-        "frete": round(valor_frete, 2),
-        "total": round(total, 2),
-        "codigo_pix": pix_copia_e_cola,
-        "qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={pix_copia_e_cola}",
-        "status": "Aguardando Pagamento"
-    }
+    try:
+        subtotal = sum(item.preco for item in pedido.itens)
+        valor_frete = 5.00 + (pedido.distancia_km * 2.00)
+        total = subtotal + valor_frete
 
-# 5. Configuração para rodar na nuvem (Render/Railway)
+        # Dados para o Mercado Pago
+        payment_data = {
+            "transaction_amount": float(total),
+            "description": "Pedido KamiKami Delivery",
+            "payment_method_id": "pix",
+            "payer": {
+                "email": "cliente@kamikami.com", # Pode ser dinâmico depois
+                "first_name": "Cliente",
+                "last_name": "KamiKami"
+            }
+        }
+
+        # Cria o pagamento no Mercado Pago
+        payment_response = sdk.payment().create(payment_data)
+        payment = payment_response["response"]
+
+        # Retorna o QR Code Real e o Código Copia e Cola
+        return {
+            "subtotal": round(subtotal, 2),
+            "frete": round(valor_frete, 2),
+            "total": round(total, 2),
+            "codigo_pix": payment["point_of_interaction"]["transaction_data"]["qr_code"],
+            "qr_code_url": payment["point_of_interaction"]["transaction_data"]["ticket_url"],
+            "status": "Aguardando Pagamento"
+        }
+    except Exception as e:
+        print(f"Erro no Mercado Pago: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao gerar pagamento")
+
 if __name__ == "__main__":
     import uvicorn
-    # O Render fornece a porta automaticamente pela variável de ambiente PORT
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
