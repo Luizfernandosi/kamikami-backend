@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import mercadopago
 import os
 import uvicorn
+from datetime import datetime
 
 app = FastAPI()
 
@@ -17,7 +18,7 @@ app.add_middleware(
 # CREDENCIAIS MERCADO PAGO (SANDBOX)
 SDK = mercadopago.SDK("TEST-819053197713657-011222-194aeab4af602ac4782b61b245651ce7-181707904")
 
-# BANCO DE DADOS EM MEMÓRIA (Cardápio Inicial)
+# BANCO DE DADOS EM MEMÓRIA
 db_cardapio = {
     "frete": 7.00,
     "produtos": [
@@ -31,38 +32,50 @@ db_cardapio = {
     ]
 }
 
+# Nova lista para armazenar os pedidos recebidos
+db_pedidos = []
+
 # --- ROTAS DO CARDÁPIO ---
 
 @app.get('/cardapio')
 async def obter_cardapio():
-    """Retorna o cardápio atual para o site"""
     return db_cardapio
 
 @app.post('/atualizar_cardapio')
 async def atualizar_cardapio(request: Request):
-    """Atualiza preços, frete e status (Área do Admin)"""
     try:
         dados = await request.json()
-        
-        # Validação de Senha
         if dados.get("senha") != "Kami-MAS":
             raise HTTPException(status_code=401, detail="Senha incorreta")
         
-        # Atualiza os dados globais
         global db_cardapio
         db_cardapio["frete"] = float(dados["config"]["frete"])
         db_cardapio["produtos"] = dados["config"]["produtos"]
-        
-        print("Cardápio atualizado via Painel Administrativo")
         return {"status": "sucesso"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# --- ROTAS DE PEDIDOS (NOVO) ---
+
+@app.get('/listar_pedidos')
+async def listar_pedidos():
+    """Retorna todos os pedidos para o painel de monitoramento"""
+    return db_pedidos
+
+@app.post('/limpar_pedidos')
+async def limpar_pedidos(request: Request):
+    """Limpa a lista de pedidos (necessita senha)"""
+    dados = await request.json()
+    if dados.get("senha") == "Kami-MAS":
+        global db_pedidos
+        db_pedidos = []
+        return {"status": "limpo"}
+    return {"status": "erro"}
 
 # --- ROTA DE PAGAMENTO ---
 
 @app.post('/checkout')
 async def checkout(request: Request):
-    """Gera o link de pagamento do Mercado Pago"""
     try:
         dados = await request.json()
         itens_carrinho = dados.get('itens', [])
@@ -78,13 +91,24 @@ async def checkout(request: Request):
                 "currency_id": "BRL"
             })
         
-        # Adiciona o frete como item
         itens_pagamento.append({
             "title": "Taxa de Entrega KamiKami",
             "quantity": 1,
             "unit_price": frete_atual,
             "currency_id": "BRL"
         })
+
+        # REGISTRO DO PEDIDO NO SISTEMA INTERNO
+        # Criamos um registro antes de enviar para o Mercado Pago
+        novo_pedido = {
+            "id": len(db_pedidos) + 1,
+            "hora": datetime.now().strftime("%H:%M:%S"),
+            "itens": itens_carrinho,
+            "endereco": endereco,
+            "total": sum(i['preco'] for i in itens_carrinho) + frete_atual,
+            "status": "Aguardando Pagamento"
+        }
+        db_pedidos.insert(0, novo_pedido) # Coloca o mais novo no topo da lista
 
         preference_data = {
             "items": itens_pagamento,
@@ -95,13 +119,12 @@ async def checkout(request: Request):
             },
             "auto_return": "approved",
             "metadata": {
+                "id_pedido": novo_pedido["id"],
                 "endereco_entrega": endereco
             }
         }
 
         result = SDK.preference().create(preference_data)
-        
-        # Retorna link de Sandbox (Teste) ou Produção
         link = result["response"].get("sandbox_init_point") or result["response"].get("init_point")
         
         return {"qr_code_url": link}
@@ -109,8 +132,6 @@ async def checkout(request: Request):
     except Exception as e:
         print(f"Erro no Checkout: {str(e)}")
         return {"error": str(e)}, 500
-
-# --- INICIALIZAÇÃO ---
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
