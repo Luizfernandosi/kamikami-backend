@@ -8,27 +8,73 @@ void main() => runApp(const MaterialApp(home: AppCliente(), debugShowCheckedMode
 class AppCliente extends StatefulWidget {
   const AppCliente({super.key});
   @override
-  _AppClienteState createState() => _AppClienteState();
+  State<AppCliente> createState() => _AppClienteState();
 }
 
 class _AppClienteState extends State<AppCliente> {
   Map<String, Map<String, dynamic>> carrinhoMap = {};
-  double frete = 0.00;
-  double taxaFixa = 7.00; // ALTERE AQUI O VALOR DA SUA ENTREGA PRÓPRIA
-  TextEditingController enderecoController = TextEditingController();
-  bool enderecoValidado = false;
+  double frete = 7.00;
   
   final Color corLaranja = const Color(0xFFFF944D); 
   final Color corPreta = const Color(0xFF1A1A1A);
+  
+  TextEditingController cepController = TextEditingController();
+  TextEditingController ruaController = TextEditingController();
+  TextEditingController numeroController = TextEditingController();
+  TextEditingController complementoController = TextEditingController();
+  TextEditingController bairroController = TextEditingController();
+  TextEditingController referenciaController = TextEditingController();
+  
+  bool carregandoCep = false;
+  String mensagemErroCep = "";
   final String urlBase = "https://kamikami-backend.onrender.com";
 
-  double get total {
-    double subtotal = 0;
+  double get valorSubtotal {
+    double sub = 0;
     carrinhoMap.forEach((key, value) {
       double preco = double.parse(value['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'));
-      subtotal += preco * value['qtd'];
+      sub += preco * value['qtd'];
     });
-    return subtotal + (enderecoValidado ? frete : 0);
+    return sub;
+  }
+
+  double get valorTotalFinal => valorSubtotal + frete;
+
+  bool get podeFinalizar => 
+    cepController.text.length == 9 && 
+    ruaController.text.isNotEmpty && 
+    numeroController.text.isNotEmpty && 
+    carrinhoMap.isNotEmpty;
+
+  Future<void> buscarCEP(String valor, StateSetter setModalState) async {
+    String cepLimpo = valor.replaceAll('-', '');
+    if (cepLimpo.length > 5 && !valor.contains('-')) {
+      String formatado = "${cepLimpo.substring(0, 5)}-${cepLimpo.substring(5)}";
+      cepController.value = TextEditingValue(
+        text: formatado,
+        selection: TextSelection.collapsed(offset: formatado.length),
+      );
+    }
+    if (cepLimpo.length == 8) {
+      setModalState(() { carregandoCep = true; mensagemErroCep = ""; });
+      try {
+        final response = await http.get(Uri.parse('https://viacep.com.br/ws/$cepLimpo/json/'));
+        if (response.statusCode == 200) {
+          final dados = json.decode(response.body);
+          if (dados['erro'] == null) {
+            setModalState(() {
+              ruaController.text = dados['logradouro'] ?? "";
+              bairroController.text = dados['bairro'] ?? "";
+              carregandoCep = false;
+            });
+          } else {
+            setModalState(() { carregandoCep = false; mensagemErroCep = "CEP não encontrado!"; ruaController.clear(); bairroController.clear(); });
+          }
+        }
+      } catch (e) { setModalState(() => carregandoCep = false); }
+    } else if (cepLimpo.length < 8) {
+      setModalState(() { ruaController.clear(); bairroController.clear(); mensagemErroCep = ""; });
+    }
   }
 
   void adicionarAoCarrinho(String nome, String preco) {
@@ -53,66 +99,143 @@ class _AppClienteState extends State<AppCliente> {
     });
   }
 
-  // Validação para Entrega Própria
-  void validarEnderecoProprio(String endereco, StateSetter setModalState) {
-    if (endereco.length > 10) {
-      setState(() => frete = taxaFixa);
-      setModalState(() => enderecoValidado = true);
-    } else {
-      setModalState(() => enderecoValidado = false);
-    }
-  }
-
-  void abrirAbaFinalizacao() {
+  void abrirCheckoutUnificado() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      enableDrag: true, // Habilita o arrastar para baixo
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (ctx) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setModalState) {
           return Container(
             padding: EdgeInsets.only(
-              left: 20, right: 20, top: 20,
+              left: 20, right: 20, top: 10,
               bottom: MediaQuery.of(context).viewInsets.bottom + 20
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text("FINALIZAR PAGAMENTO", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const Divider(),
-                const SizedBox(height: 15),
-                TextField(
-                  controller: enderecoController,
-                  onChanged: (val) => validarEnderecoProprio(val, setModalState),
-                  decoration: InputDecoration(
-                    labelText: "Seu Endereço Completo",
-                    hintText: "Rua, Número, Bairro",
-                    prefixIcon: const Icon(Icons.location_on, color: Colors.red),
-                    suffixIcon: Icon(
-                      enderecoValidado ? Icons.check_circle : Icons.error_outline,
-                      color: enderecoValidado ? Colors.green : Colors.grey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // BARRINHA DE ARRASTAR (INDICADOR VISUAL)
+                  Container(
+                    width: 40,
+                    height: 5,
+                    margin: const EdgeInsets.only(bottom: 15),
+                    decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text("REVISÃO E PAGAMENTO", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                    ],
+                  ),
+                  if (mensagemErroCep.isNotEmpty)
+                    Text(mensagemErroCep, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  const Divider(),
+                  
+                  // CEP
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: cepController,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(fontSize: 18),
+                          maxLength: 9,
+                          decoration: const InputDecoration(labelText: "CEP *", counterText: ""),
+                          onChanged: (val) => buscarCEP(val, setModalState),
+                        ),
+                      ),
+                      if (carregandoCep) const Padding(padding: EdgeInsets.all(8.0), child: CircularProgressIndicator()),
+                    ],
+                  ),
+                  
+                  TextField(
+                    controller: ruaController, 
+                    readOnly: true,
+                    style: const TextStyle(fontSize: 18, color: Colors.blueGrey),
+                    decoration: const InputDecoration(labelText: "Rua/Avenida", filled: true, fillColor: Color(0xFFF8F8F8)),
+                  ),
+                  
+                  const SizedBox(height: 10),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2, 
+                        child: TextField(
+                          controller: numeroController, 
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(fontSize: 18), 
+                          decoration: const InputDecoration(labelText: "Nº *", hintText: "Ex: 123"), 
+                          onChanged: (v) => setModalState((){})
+                        )
+                      ),
+                      const SizedBox(width: 15),
+                      Expanded(
+                        flex: 3, 
+                        child: TextField(
+                          controller: complementoController, 
+                          style: const TextStyle(fontSize: 18), 
+                          decoration: const InputDecoration(
+                            labelText: "Apto/Bloco/Casa", 
+                            hintText: "Se houver",
+                            labelStyle: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)
+                          ),
+                        )
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  TextField(
+                    controller: bairroController, 
+                    readOnly: true, 
+                    style: const TextStyle(fontSize: 18, color: Colors.blueGrey), 
+                    decoration: const InputDecoration(labelText: "Bairro", filled: true, fillColor: Color(0xFFF8F8F8))
+                  ),
+
+                  TextField(
+                    controller: referenciaController, 
+                    style: const TextStyle(fontSize: 18),
+                    decoration: const InputDecoration(labelText: "Ponto de Referência", hintText: "Ex: Próximo ao mercado..."),
+                  ),
+                  
+                  const SizedBox(height: 20),
+                  const Text("ITENS DO PEDIDO", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Divider(),
+                  
+                  ...carrinhoMap.entries.map((entry) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(children: [
+                      Text("${entry.value['qtd']}x", style: TextStyle(color: corLaranja, fontWeight: FontWeight.bold, fontSize: 20)),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(entry.key, style: const TextStyle(fontSize: 18))),
+                      IconButton(icon: const Icon(Icons.remove_circle, color: Colors.red, size: 32), onPressed: () { removerDoCarrinho(entry.key); setModalState(() {}); }),
+                      IconButton(icon: const Icon(Icons.add_circle, color: Colors.green, size: 32), onPressed: () { adicionarAoCarrinho(entry.key, entry.value['preco']); setModalState(() {}); }),
+                    ]),
+                  )).toList(),
+                  
+                  const Divider(height: 30),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    const Text("TOTAL:", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    Text("R\$ ${valorTotalFinal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 28, color: Colors.green, fontWeight: FontWeight.bold))
+                  ]),
+                  
+                  const SizedBox(height: 25),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: podeFinalizar ? Colors.blue : Colors.grey,
+                      minimumSize: const Size(double.infinity, 65),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
                     ),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    onPressed: podeFinalizar ? () => processarPagamento() : null,
+                    child: const Text("PAGAR COM MERCADO PAGO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
                   ),
-                ),
-                const SizedBox(height: 20),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Subtotal:"), Text("R\$ ${(total - (enderecoValidado ? frete : 0)).toStringAsFixed(2)}")]),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Taxa de Entrega:"), Text("R\$ ${frete.toStringAsFixed(2)}", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold))]),
-                const Divider(),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("TOTAL:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), Text("R\$ ${total.toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.green))]),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: enderecoValidado ? Colors.blue : Colors.grey,
-                    minimumSize: const Size(double.infinity, 60),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
-                  ),
-                  onPressed: enderecoValidado ? () => processarCheckoutReal() : null,
-                  child: const Text("PAGAR COM MERCADO PAGO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(height: 10),
-                const Text("Sua entrega será feita por nossa equipe própria.", style: TextStyle(fontSize: 11, color: Colors.grey)),
-              ],
+                ],
+              ),
             ),
           );
         },
@@ -120,37 +243,18 @@ class _AppClienteState extends State<AppCliente> {
     );
   }
 
-  Future<void> processarCheckoutReal() async {
+  Future<void> processarPagamento() async {
     List itens = [];
     carrinhoMap.forEach((k, v) => itens.add({"nome": k, "preco": double.parse(v['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'))}));
-    
-    try {
-      final response = await http.post(
-        Uri.parse('$urlBase/checkout'),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode({
-          "itens": itens, 
-          "endereco": enderecoController.text, 
-          "frete": frete,
-          "entrega_propria": true
-        }),
-      );
-      
-      if (response.statusCode == 200) {
-        var dados = json.decode(response.body);
-        await launchUrl(Uri.parse(dados['qr_code_url']), mode: LaunchMode.externalApplication);
-        
-        if (!mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => PaginaStatus(
-            endereco: enderecoController.text,
-            total: total,
-          )),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erro ao processar pedido. Tente novamente.")));
+    final enderecoFormatado = "${ruaController.text}, ${numeroController.text} (${complementoController.text}). Bairro: ${bairroController.text}. Ref: ${referenciaController.text}. CEP: ${cepController.text}";
+    final response = await http.post(
+      Uri.parse('$urlBase/checkout'),
+      headers: {"Content-Type": "application/json"},
+      body: json.encode({"itens": itens, "endereco": enderecoFormatado, "frete": frete}),
+    );
+    if (response.statusCode == 200) {
+      var dados = json.decode(response.body);
+      await launchUrl(Uri.parse(dados['qr_code_url']), mode: LaunchMode.externalApplication);
     }
   }
 
@@ -158,27 +262,28 @@ class _AppClienteState extends State<AppCliente> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(title: const Text("KAMI KAMI YAKISSOBA", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)), centerTitle: true, backgroundColor: corPreta),
+      appBar: AppBar(title: const Text("KAMI KAMI YAKISSOBA", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 22)), centerTitle: true, backgroundColor: corPreta),
       body: Column(
         children: [
-          Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 10), color: corLaranja, child: const Text("MENU COMPLETO", textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12), color: corLaranja, child: const Text("MENU COMPLETO", textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
           Expanded(
             child: ListView(
               children: [
-                itemMenu('01 - CARNE', 'R\$ 29,90', '🥩', 'Carne+Legumes+Verduras Tradicionais (440g)'),
-                itemMenu('02 - MISTO', 'R\$ 28,90', '🍱', 'Carne e Frango+Legumes+Verduras (440g)'),
-                itemMenu('03 - FRANGO', 'R\$ 27,90', '🍗', 'Frango+Legumes+Verduras Tradicionais (440g)'),
-                itemMenu('04 - LEGUMES', 'R\$ 26,90', '🥦', 'Legumes+Verduras Tradicionais (440g)'),
-                itemMenu('05 - CAMARÃO', 'R\$ 34,90', '🍤', 'Camarão+Legumes+Verduras Tradicionais (440g)'),
+                itemMenu('01 - CARNE', 'R\$ 29,90', '🥩', 'Carne+Legumes+Verduras Tradicionais'),
+                itemMenu('02 - MISTO', 'R\$ 28,90', '🍱', 'Carne e Frango+Legumes+Verduras'),
+                itemMenu('03 - FRANGO', 'R\$ 27,90', '🍗', 'Frango+Legumes+Verduras Tradicionais'),
+                itemMenu('04 - LEGUMES', 'R\$ 26,90', '🥦', 'Legumes+Verduras Tradicionais'),
+                itemMenu('05 - CAMARÃO', 'R\$ 34,90', '🍤', 'Camarão+Legumes+Verduras Tradicionais'),
                 itemMenu('06 - TEMAKI SALMÃO', 'R\$ 30,90', '🍣', 'Salmão Fresco, Cream Cheese e Cebolinha'),
                 const Divider(),
-                itemMenu('MACARRÃO ADICIONAL', 'R\$ 7,50', '🍜', 'Porção extra de macarrão'),
-                itemMenu('LEGUMES ADICIONAL', 'R\$ 7,50', '🥗', 'Porção extra de legumes'),
-                const SizedBox(height: 100),
+                itemMenu('PRODUTO TESTE', 'R\$ 2,00', '🛠️', 'Teste de Pagamento'),
+                const SizedBox(height: 40),
+                secaoInstagram(),
+                const SizedBox(height: 120),
               ],
             ),
           ),
-          if (carrinhoMap.isNotEmpty) containerResumoNovo(),
+          if (carrinhoMap.isNotEmpty) containerResumoFlutuante(),
         ],
       ),
     );
@@ -186,94 +291,52 @@ class _AppClienteState extends State<AppCliente> {
 
   Widget itemMenu(String nome, String preco, String emoji, String desc) {
     return ListTile(
-      leading: Text(emoji, style: const TextStyle(fontSize: 30)),
-      title: Text(nome, style: const TextStyle(fontWeight: FontWeight.bold)),
-      subtitle: Text(desc, style: const TextStyle(fontSize: 10)),
-      trailing: IconButton(icon: const Icon(Icons.add_circle, color: Colors.orange, size: 30), onPressed: () => adicionarAoCarrinho(nome, preco)),
+      leading: Text(emoji, style: const TextStyle(fontSize: 35)),
+      title: Text(nome, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+      subtitle: Text("$desc\n$preco", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 14)),
+      trailing: IconButton(icon: const Icon(Icons.add_circle, color: Colors.orange, size: 35), onPressed: () => adicionarAoCarrinho(nome, preco)),
     );
   }
 
-  Widget containerResumoNovo() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey[300]!, width: 3)), boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 10)]),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const SizedBox(width: 48), const Text("CONFERIR PEDIDO", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), IconButton(icon: const Icon(Icons.delete_sweep, color: Colors.redAccent), onPressed: () => setState(() => carrinhoMap.clear()))]),
-          ...carrinhoMap.entries.map((entry) => Row(children: [Text("${entry.value['qtd']}x", style: TextStyle(color: corLaranja, fontWeight: FontWeight.bold)), const SizedBox(width: 12), Expanded(child: Text(entry.key)), IconButton(icon: const Icon(Icons.remove_circle, color: Colors.red), onPressed: () => removerDoCarrinho(entry.key)), IconButton(icon: const Icon(Icons.add_circle, color: Colors.green), onPressed: () => adicionarAoCarrinho(entry.key, entry.value['preco']))])).toList(),
-          const Divider(),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(double.infinity, 55), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-            onPressed: () => abrirAbaFinalizacao(),
-            child: const Text("PROSSEGUIR PARA PAGAMENTO", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          )
-        ],
-      ),
-    );
-  }
-}
-
-class PaginaStatus extends StatelessWidget {
-  final String endereco;
-  final double total;
-  const PaginaStatus({super.key, required this.endereco, required this.total});
-
-  void abrirSuporteWhatsapp() {
-    String mensagem = "Olá! Preciso de ajuda com meu pedido no KamiKami. Endereço: $endereco";
-    String url = "https://wa.me/5511999999999?text=${Uri.encodeComponent(mensagem)}"; // COLOQUE SEU NUMERO AQUI
-    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(title: const Text("Acompanhar Pedido"), backgroundColor: const Color(0xFF1A1A1A), automaticallyImplyLeading: false),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
+  Widget secaoInstagram() {
+    return Center(
+      child: InkWell(
+        onTap: () => launchUrl(Uri.parse("https://instagram.com/kamikamiyakissoba")),
         child: Column(
           children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 70),
-            const SizedBox(height: 10),
-            const Text("PEDIDO CONFIRMADO!", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const Text("Seu Yakissoba já entrou em produção!", textAlign: TextAlign.center),
-            const SizedBox(height: 30),
-            statusRow(Icons.receipt_long, "Pedido Recebido", true),
-            statusRow(Icons.restaurant, "Preparando na Cozinha", true),
-            statusRow(Icons.moped, "Saiu para entrega (Equipe Própria)", false),
-            statusRow(Icons.home, "Entregue", false),
-            const Divider(height: 40),
-            const Text("DÚVIDAS SOBRE A ENTREGA?", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 15),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(double.infinity, 55)),
-              icon: const Icon(Icons.chat, color: Colors.white),
-              label: const Text("CHAMAR NO WHATSAPP", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              onPressed: abrirSuporteWhatsapp,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Colors.purple, Colors.pink, Colors.orange]),
+                borderRadius: BorderRadius.circular(15)
+              ),
+              child: const Icon(Icons.camera_alt, color: Colors.white, size: 30),
             ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFFF944D), width: 2), minimumSize: const Size(double.infinity, 55)),
-              icon: const Icon(Icons.camera_alt, color: Color(0xFFFF944D)),
-              label: const Text("VER NOSSO INSTAGRAM", style: TextStyle(color: Color(0xFFFF944D), fontWeight: FontWeight.bold)),
-              onPressed: () => launchUrl(Uri.parse("https://instagram.com/kamikamiyakissoba")),
-            ),
+            const SizedBox(height: 8),
+            const Text("SIGA NOSSO INSTAGRAM", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: Colors.black54)),
           ],
         ),
       ),
     );
   }
 
-  Widget statusRow(IconData icon, String texto, bool concluido) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
+  Widget containerResumoFlutuante() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey[300]!, width: 2))),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          CircleAvatar(backgroundColor: concluido ? Colors.green.withOpacity(0.2) : Colors.grey[200], child: Icon(icon, color: concluido ? Colors.green : Colors.grey, size: 20)),
-          const SizedBox(width: 15),
-          Expanded(child: Text(texto, style: TextStyle(fontWeight: concluido ? FontWeight.bold : FontWeight.normal, color: concluido ? Colors.black : Colors.grey, fontSize: 15))),
-          if (concluido) const Icon(Icons.check_circle, color: Colors.green, size: 20)
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text("${carrinhoMap.length} item(ns)", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text("Subtotal: R\$ ${valorSubtotal.toStringAsFixed(2)}", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 20))
+          ]),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size(double.infinity, 60)),
+            onPressed: () => abrirCheckoutUnificado(),
+            child: const Text("REVISAR E PAGAR", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+          )
         ],
       ),
     );
