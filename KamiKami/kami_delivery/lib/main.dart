@@ -18,6 +18,7 @@ class _AppClienteState extends State<AppCliente> {
   final Color corLaranja = const Color(0xFFFF944D); 
   final Color corPreta = const Color(0xFF1A1A1A);
   
+  // Controladores de Endereço
   TextEditingController cepController = TextEditingController();
   TextEditingController ruaController = TextEditingController();
   TextEditingController numeroController = TextEditingController();
@@ -46,6 +47,7 @@ class _AppClienteState extends State<AppCliente> {
     numeroController.text.isNotEmpty && 
     carrinhoMap.isNotEmpty;
 
+  // Busca Automática de CEP com Máscara e Bloqueio
   Future<void> buscarCEP(String valor, StateSetter setModalState) async {
     String cepLimpo = valor.replaceAll('-', '');
     if (cepLimpo.length > 5 && !valor.contains('-')) {
@@ -103,7 +105,7 @@ class _AppClienteState extends State<AppCliente> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      enableDrag: true, // Habilita o arrastar para baixo
+      enableDrag: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (ctx) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setModalState) {
@@ -116,11 +118,8 @@ class _AppClienteState extends State<AppCliente> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // BARRINHA DE ARRASTAR (INDICADOR VISUAL)
                   Container(
-                    width: 40,
-                    height: 5,
-                    margin: const EdgeInsets.only(bottom: 15),
+                    width: 40, height: 5, margin: const EdgeInsets.only(bottom: 15),
                     decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)),
                   ),
                   Row(
@@ -134,73 +133,37 @@ class _AppClienteState extends State<AppCliente> {
                     Text(mensagemErroCep, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                   const Divider(),
                   
-                  // CEP
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: cepController,
-                          keyboardType: TextInputType.number,
-                          style: const TextStyle(fontSize: 18),
-                          maxLength: 9,
-                          decoration: const InputDecoration(labelText: "CEP *", counterText: ""),
-                          onChanged: (val) => buscarCEP(val, setModalState),
-                        ),
-                      ),
-                      if (carregandoCep) const Padding(padding: EdgeInsets.all(8.0), child: CircularProgressIndicator()),
-                    ],
-                  ),
-                  
+                  // CAMPOS DE ENDEREÇO
                   TextField(
-                    controller: ruaController, 
-                    readOnly: true,
+                    controller: cepController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(fontSize: 18),
+                    maxLength: 9,
+                    decoration: const InputDecoration(labelText: "CEP *", counterText: ""),
+                    onChanged: (val) => buscarCEP(val, setModalState),
+                  ),
+                  TextField(
+                    controller: ruaController, readOnly: true,
                     style: const TextStyle(fontSize: 18, color: Colors.blueGrey),
                     decoration: const InputDecoration(labelText: "Rua/Avenida", filled: true, fillColor: Color(0xFFF8F8F8)),
                   ),
-                  
                   const SizedBox(height: 10),
-
                   Row(
                     children: [
-                      Expanded(
-                        flex: 2, 
-                        child: TextField(
-                          controller: numeroController, 
-                          keyboardType: TextInputType.number,
-                          style: const TextStyle(fontSize: 18), 
-                          decoration: const InputDecoration(labelText: "Nº *", hintText: "Ex: 123"), 
-                          onChanged: (v) => setModalState((){})
-                        )
-                      ),
+                      Expanded(flex: 2, child: TextField(controller: numeroController, keyboardType: TextInputType.number, style: const TextStyle(fontSize: 18), decoration: const InputDecoration(labelText: "Nº *"), onChanged: (v) => setModalState((){}))),
                       const SizedBox(width: 15),
-                      Expanded(
-                        flex: 3, 
-                        child: TextField(
-                          controller: complementoController, 
-                          style: const TextStyle(fontSize: 18), 
-                          decoration: const InputDecoration(
-                            labelText: "Apto/Bloco/Casa", 
-                            hintText: "Se houver",
-                            labelStyle: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)
-                          ),
-                        )
-                      ),
+                      Expanded(flex: 3, child: TextField(controller: complementoController, style: const TextStyle(fontSize: 18), decoration: const InputDecoration(labelText: "Apto/Bloco/Casa", labelStyle: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)))),
                     ],
                   ),
-
                   const SizedBox(height: 10),
-
                   TextField(
-                    controller: bairroController, 
-                    readOnly: true, 
-                    style: const TextStyle(fontSize: 18, color: Colors.blueGrey), 
-                    decoration: const InputDecoration(labelText: "Bairro", filled: true, fillColor: Color(0xFFF8F8F8))
+                    controller: bairroController, readOnly: true,
+                    style: const TextStyle(fontSize: 18, color: Colors.blueGrey),
+                    decoration: const InputDecoration(labelText: "Bairro", filled: true, fillColor: Color(0xFFF8F8F8)),
                   ),
-
                   TextField(
-                    controller: referenciaController, 
-                    style: const TextStyle(fontSize: 18),
-                    decoration: const InputDecoration(labelText: "Ponto de Referência", hintText: "Ex: Próximo ao mercado..."),
+                    controller: referenciaController, style: const TextStyle(fontSize: 18),
+                    decoration: const InputDecoration(labelText: "Ponto de Referência"),
                   ),
                   
                   const SizedBox(height: 20),
@@ -223,7 +186,6 @@ class _AppClienteState extends State<AppCliente> {
                     const Text("TOTAL:", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                     Text("R\$ ${valorTotalFinal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 28, color: Colors.green, fontWeight: FontWeight.bold))
                   ]),
-                  
                   const SizedBox(height: 25),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
@@ -243,18 +205,33 @@ class _AppClienteState extends State<AppCliente> {
     );
   }
 
+  // FUNÇÃO ATUALIZADA PARA ABRIR LINK SEM BLOQUEIO
   Future<void> processarPagamento() async {
     List itens = [];
     carrinhoMap.forEach((k, v) => itens.add({"nome": k, "preco": double.parse(v['preco'].replaceAll('R\$ ', '').replaceAll(',', '.'))}));
+    
     final enderecoFormatado = "${ruaController.text}, ${numeroController.text} (${complementoController.text}). Bairro: ${bairroController.text}. Ref: ${referenciaController.text}. CEP: ${cepController.text}";
-    final response = await http.post(
-      Uri.parse('$urlBase/checkout'),
-      headers: {"Content-Type": "application/json"},
-      body: json.encode({"itens": itens, "endereco": enderecoFormatado, "frete": frete}),
-    );
-    if (response.statusCode == 200) {
-      var dados = json.decode(response.body);
-      await launchUrl(Uri.parse(dados['qr_code_url']), mode: LaunchMode.externalApplication);
+    
+    try {
+      final response = await http.post(
+        Uri.parse('$urlBase/checkout'),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({"itens": itens, "endereco": enderecoFormatado, "frete": frete}),
+      );
+
+      if (response.statusCode == 200) {
+        var dados = json.decode(response.body);
+        String url = dados['qr_code_url'];
+        
+        // Abre o link em modo externo para evitar bloqueios de pop-up
+        await launchUrl(
+          Uri.parse(url),
+          mode: LaunchMode.externalApplication,
+          webOnlyWindowName: '_blank',
+        );
+      }
+    } catch (e) {
+      debugPrint("Erro ao chamar o backend: $e");
     }
   }
 
