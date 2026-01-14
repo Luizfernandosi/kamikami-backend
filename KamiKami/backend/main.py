@@ -6,6 +6,7 @@ import uvicorn
 
 app = FastAPI()
 
+# Permite que o seu site (Frontend) acesse o Servidor (Backend)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,7 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# TOKEN DE TESTE (SANDBOX)
+# CREDENCIAIS DE TESTE - LUÍZ
 SDK = mercadopago.SDK("TEST-819053197713657-011222-194aeab4af602ac4782b61b245651ce7-181707904")
 
 @app.post('/checkout')
@@ -21,51 +22,50 @@ async def checkout(request: Request):
     try:
         dados = await request.json()
         itens_carrinho = dados.get('itens', [])
-        frete = dados.get('frete', 0)
+        frete = float(dados.get('frete', 7.0))
 
-        # Montagem rigorosa dos itens para evitar o erro "Ops"
+        # 1. Montagem Simplificada dos Itens
         itens_pagamento = []
         for item in itens_carrinho:
             itens_pagamento.append({
-                "title": str(item['nome']),
+                "title": item['nome'],
                 "quantity": 1,
                 "unit_price": float(item['preco']),
-                "currency_id": "BRL"  # Moeda obrigatória
-            })
-        
-        # Adiciona o frete como um item separado
-        if float(frete) > 0:
-            itens_pagamento.append({
-                "title": "Taxa de Entrega KamiKami",
-                "quantity": 1,
-                "unit_price": float(frete),
                 "currency_id": "BRL"
             })
+        
+        # 2. Adiciona o Frete como um item para não dar erro de cálculo
+        itens_pagamento.append({
+            "title": "Entrega KamiKami",
+            "quantity": 1,
+            "unit_price": frete,
+            "currency_id": "BRL"
+        })
 
+        # 3. Preferência de Pagamento Básica (Mínimo exigido pelo Mercado Pago)
         preference_data = {
             "items": itens_pagamento,
-            "payment_methods": {
-                "excluded_payment_types": [],
-                "installments": 12
-            },
             "back_urls": {
                 "success": "https://kamikami-af5fe.web.app/#/sucesso",
                 "failure": "https://kamikami-af5fe.web.app/#/erro",
                 "pending": "https://kamikami-af5fe.web.app/#/pendente"
             },
             "auto_return": "approved",
-            "binary_mode": True # Força aprovação ou reprovação imediata
+            "payment_methods": {
+                "installments": 1, # Limita a 1 vez para teste
+            }
         }
 
         result = SDK.preference().create(preference_data)
         
-        # Pegando o ponto de início do Sandbox
-        link_final = result["response"]["sandbox_init_point"]
+        # 4. Tenta pegar o link de Sandbox, se falhar, pega o de Produção
+        link = result["response"].get("sandbox_init_point") or result["response"].get("init_point")
 
-        return {"qr_code_url": link_final}
+        print(f"Link Gerado com Sucesso: {link}")
+        return {"qr_code_url": link}
         
     except Exception as e:
-        print(f"Erro no Processamento: {str(e)}")
+        print(f"ERRO CRÍTICO NO BACKEND: {str(e)}")
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
