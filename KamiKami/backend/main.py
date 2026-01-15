@@ -15,27 +15,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# CREDENCIAIS MERCADO PAGO (SANDBOX)
+# CREDENCIAIS MERCADO PAGO
 SDK = mercadopago.SDK("TEST-819053197713657-011222-194aeab4af602ac4782b61b245651ce7-181707904")
 
-# BANCO DE DADOS EM MEMÓRIA
+# --- BANCO DE DADOS EM MEMÓRIA ---
 db_cardapio = {
     "frete": 7.00,
     "produtos": [
         {"id": 1, "nome": "01 - CARNE", "preco": 29.90, "emoji": "🥩", "desc": "Carne+Legumes+Verduras Tradicionais", "ativo": True},
         {"id": 2, "nome": "02 - MISTO", "preco": 28.90, "emoji": "🍱", "desc": "Carne e Frango+Legumes+Verduras", "ativo": True},
         {"id": 3, "nome": "03 - FRANGO", "preco": 27.90, "emoji": "🍗", "desc": "Frango+Legumes+Verduras Tradicionais", "ativo": True},
-        {"id": 4, "nome": "04 - LEGUMES", "preco": 26.90, "emoji": "🥦", "desc": "Legumes+Verduras Tradicionais", "ativo": True},
-        {"id": 5, "nome": "05 - CAMARÃO", "preco": 34.90, "emoji": "🍤", "desc": "Camarão+Legumes+Verduras Tradicionais", "ativo": True},
-        {"id": 6, "nome": "06 - TEMAKI SALMÃO", "preco": 30.90, "emoji": "🍣", "desc": "Salmão Fresco, Cream Cheese e Cebolinha", "ativo": True},
-        {"id": 7, "nome": "PRODUTO TESTE", "preco": 2.00, "emoji": "🛠️", "desc": "Teste de Pagamento", "ativo": True},
+        {"id": 4, "nome": "04 - CAMARÃO", "preco": 34.90, "emoji": "🍤", "desc": "Camarão+Legumes+Verduras Tradicionais", "ativo": True},
+        {"id": 5, "nome": "PRODUTO TESTE", "preco": 2.00, "emoji": "🛠️", "desc": "Teste de Pagamento", "ativo": True},
     ]
 }
 
-# Nova lista para armazenar os pedidos recebidos
 db_pedidos = []
+db_usuarios = [] # Lista de clientes cadastrados
+db_cupons = [
+    {"codigo": "KAMI10", "tipo": "porcentagem", "valor": 10},
+    {"codigo": "BEMVINDO5", "tipo": "fixo", "valor": 5.00}
+]
 
-# --- ROTAS DO CARDÁPIO ---
+# --- ROTAS DE GESTÃO (ADMIN) ---
 
 @app.get('/cardapio')
 async def obter_cardapio():
@@ -43,36 +45,59 @@ async def obter_cardapio():
 
 @app.post('/atualizar_cardapio')
 async def atualizar_cardapio(request: Request):
-    try:
-        dados = await request.json()
-        if dados.get("senha") != "Kami-MAS":
-            raise HTTPException(status_code=401, detail="Senha incorreta")
-        
-        global db_cardapio
-        db_cardapio["frete"] = float(dados["config"]["frete"])
-        db_cardapio["produtos"] = dados["config"]["produtos"]
-        return {"status": "sucesso"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# --- ROTAS DE PEDIDOS (NOVO) ---
+    dados = await request.json()
+    if dados.get("senha") != "Kami-MAS":
+        raise HTTPException(status_code=401, detail="Senha incorreta")
+    global db_cardapio
+    db_cardapio["frete"] = float(dados["config"]["frete"])
+    db_cardapio["produtos"] = dados["config"]["produtos"]
+    return {"status": "sucesso"}
 
 @app.get('/listar_pedidos')
 async def listar_pedidos():
-    """Retorna todos os pedidos para o painel de monitoramento"""
     return db_pedidos
 
-@app.post('/limpar_pedidos')
-async def limpar_pedidos(request: Request):
-    """Limpa a lista de pedidos (necessita senha)"""
+@app.get('/admin/clientes')
+async def listar_clientes():
+    """Retorna lista de clientes para o Admin"""
+    return db_usuarios
+
+@app.get('/admin/cupons')
+async def listar_cupons():
+    return db_cupons
+
+@app.post('/admin/criar_cupom')
+async def criar_cupom(request: Request):
     dados = await request.json()
     if dados.get("senha") == "Kami-MAS":
-        global db_pedidos
-        db_pedidos = []
-        return {"status": "limpo"}
+        db_cupons.append(dados["cupom"])
+        return {"status": "sucesso"}
     return {"status": "erro"}
 
-# --- ROTA DE PAGAMENTO ---
+# --- ROTAS DO CLIENTE (LOGIN E CUPOM) ---
+
+@app.post('/registrar_usuario')
+async def registrar_usuario(request: Request):
+    """Cadastra ou atualiza dados do cliente"""
+    dados = await request.json()
+    # Verifica se usuário já existe pelo email
+    for user in db_usuarios:
+        if user['email'] == dados['email']:
+            user.update(dados)
+            return {"status": "atualizado"}
+    db_usuarios.append(dados)
+    return {"status": "cadastrado"}
+
+@app.post('/validar_cupom')
+async def validar_cupom(request: Request):
+    dados = await request.json()
+    codigo = dados.get("codigo", "").upper()
+    for c in db_cupons:
+        if c["codigo"] == codigo:
+            return {"status": "valido", "tipo": c["tipo"], "valor": c["valor"]}
+    return {"status": "invalido"}
+
+# --- ROTA DE CHECKOUT ---
 
 @app.post('/checkout')
 async def checkout(request: Request):
@@ -81,56 +106,50 @@ async def checkout(request: Request):
         itens_carrinho = dados.get('itens', [])
         frete_atual = float(dados.get('frete', db_cardapio["frete"]))
         endereco = dados.get('endereco', 'Não informado')
+        email_cliente = dados.get('email', 'Visitante')
+        
+        # Cálculo do valor dos itens
+        total_itens = sum(float(item['preco']) for item in itens_carrinho)
+        
+        # Registro do Pedido no Histórico
+        novo_pedido = {
+            "id": len(db_pedidos) + 1,
+            "data": datetime.now().strftime("%d/%m/%Y"),
+            "hora": datetime.now().strftime("%H:%M:%S"),
+            "cliente": email_cliente,
+            "itens": itens_carrinho,
+            "endereco": endereco,
+            "total": total_itens + frete_atual,
+            "status": "Aguardando Pagamento"
+        }
+        db_pedidos.insert(0, novo_pedido)
 
-        itens_pagamento = []
+        # Preparação Mercado Pago
+        itens_mp = []
         for item in itens_carrinho:
-            itens_pagamento.append({
+            itens_mp.append({
                 "title": item['nome'],
                 "quantity": 1,
                 "unit_price": float(item['preco']),
                 "currency_id": "BRL"
             })
         
-        itens_pagamento.append({
-            "title": "Taxa de Entrega KamiKami",
-            "quantity": 1,
-            "unit_price": frete_atual,
-            "currency_id": "BRL"
-        })
-
-        # REGISTRO DO PEDIDO NO SISTEMA INTERNO
-        # Criamos um registro antes de enviar para o Mercado Pago
-        novo_pedido = {
-            "id": len(db_pedidos) + 1,
-            "hora": datetime.now().strftime("%H:%M:%S"),
-            "itens": itens_carrinho,
-            "endereco": endereco,
-            "total": sum(i['preco'] for i in itens_carrinho) + frete_atual,
-            "status": "Aguardando Pagamento"
-        }
-        db_pedidos.insert(0, novo_pedido) # Coloca o mais novo no topo da lista
+        itens_mp.append({"title": "Taxa de Entrega", "quantity": 1, "unit_price": frete_atual, "currency_id": "BRL"})
 
         preference_data = {
-            "items": itens_pagamento,
+            "items": itens_mp,
+            "metadata": {"id_pedido": novo_pedido["id"]},
             "back_urls": {
                 "success": "https://kamikami-af5fe.web.app/#/sucesso",
-                "failure": "https://kamikami-af5fe.web.app/#/erro",
-                "pending": "https://kamikami-af5fe.web.app/#/pendente"
+                "failure": "https://kamikami-af5fe.web.app/#/erro"
             },
-            "auto_return": "approved",
-            "metadata": {
-                "id_pedido": novo_pedido["id"],
-                "endereco_entrega": endereco
-            }
+            "auto_return": "approved"
         }
 
         result = SDK.preference().create(preference_data)
-        link = result["response"].get("sandbox_init_point") or result["response"].get("init_point")
-        
-        return {"qr_code_url": link}
+        return {"qr_code_url": result["response"].get("init_point")}
         
     except Exception as e:
-        print(f"Erro no Checkout: {str(e)}")
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
