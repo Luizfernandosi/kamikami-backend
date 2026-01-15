@@ -1,7 +1,7 @@
 import firebase_admin
 from firebase_admin import credentials
 
-cred = credentials.Certificate("path/to/serviceAccountKey.json")
+cred = credentials.Certificate("kamikami-af5fe-firebase-adminsdk-fbsvc-f14d81f29a.json")
 firebase_admin.initialize_app(cred)
 
 
