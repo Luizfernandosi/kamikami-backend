@@ -5,26 +5,28 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.10.7
+  sdk: '>=3.1.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # Comunicação com o servidor Python
+  # Comunicação com o servidor Python e Mercado Pago
   http: ^1.1.0 
 
-  # Localização para cálculo de frete por KM
+  # Localização para cálculo de frete
   geolocator: ^10.1.0
 
-  # Integração para enviar pedidos via WhatsApp
+  # Integração para links externos e WhatsApp
   url_launcher: ^6.2.5
 
-  # Ícones padrão para iOS
+  # Ícones padrão
   cupertino_icons: ^1.0.8
-  google_maps_flutter: ^2.14.0
-  google_places_flutter: ^2.1.1
-  location: ^8.0.1
+
+  # PACOTES DE MAPA (Versões estáveis para Web)
+  google_maps_flutter: ^2.5.0
+  google_places_flutter: ^2.0.8
+  location: ^5.0.3
 
 dev_dependencies:
   flutter_test:
@@ -33,7 +35,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
-  # Aqui você poderá adicionar logo do restaurante no futuro
-  # assets:
-  #   - assets/logo.png
