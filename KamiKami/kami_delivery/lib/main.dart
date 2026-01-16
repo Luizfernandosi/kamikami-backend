@@ -87,7 +87,7 @@ class _AppClienteState extends State<AppCliente> {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Iniciando pagamento...")));
     try {
       final res = await http.post(Uri.parse('$urlBase/criar_pagamento'), 
-        headers: {"Content-Type": "application/json"},
+        headers: {"Content-Type": "application/json", "Accept": "application/json"},
         body: json.encode({
           "titulo": "Pedido KamiKami Yakissoba",
           "valor": total,
@@ -122,7 +122,7 @@ class _AppClienteState extends State<AppCliente> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (aba == 1) TextField(controller: nomeC, decoration: const InputDecoration(labelText: "Nome Completo")),
-                TextField(controller: telC, decoration: const InputDecoration(labelText: "WhatsApp (DDD + Número)")),
+                TextField(controller: telC, decoration: const InputDecoration(labelText: "WhatsApp (DDD + Número)"), keyboardType: TextInputType.phone),
                 TextField(controller: senhaC, decoration: const InputDecoration(labelText: "Senha"), obscureText: true),
               ],
             ),
@@ -137,12 +137,14 @@ class _AppClienteState extends State<AppCliente> {
                 }
                 try {
                   String rota = aba == 0 ? "/login_usuario" : "/registrar_usuario";
+                  Map corpo = aba == 0 
+                    ? {"telefone": telC.text, "senha": senhaC.text} 
+                    : {"nome": nomeC.text, "telefone": telC.text, "senha": senhaC.text};
+
                   final res = await http.post(
                     Uri.parse("$urlBase$rota"), 
                     headers: {"Content-Type": "application/json", "Accept": "application/json"},
-                    body: json.encode(aba == 0 
-                      ? {"telefone": telC.text, "senha": senhaC.text} 
-                      : {"nome": nomeC.text, "telefone": telC.text, "senha": senhaC.text})
+                    body: json.encode(corpo)
                   ).timeout(const Duration(seconds: 30));
 
                   final d = json.decode(res.body);
@@ -154,7 +156,6 @@ class _AppClienteState extends State<AppCliente> {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(d['mensagem'] ?? "Erro na operação")));
                   }
                 } catch (e) {
-                  print("Erro de conexão: $e");
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Servidor demorou a responder. Tente novamente.")));
                 }
               }, 
@@ -197,7 +198,7 @@ class _AppClienteState extends State<AppCliente> {
               )).toList(),
               const Divider(),
               const Text("📍 ENDEREÇO", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
-              TextField(controller: cepC, decoration: const InputDecoration(labelText: "CEP"), onChanged: (v) => buscarCEP(v, setModalState)),
+              TextField(controller: cepC, decoration: const InputDecoration(labelText: "CEP"), onChanged: (v) => buscarCEP(v, setModalState), keyboardType: TextInputType.number),
               TextField(controller: ruaC, enabled: false, decoration: const InputDecoration(labelText: "Endereço Automático")),
               TextField(controller: numC, decoration: const InputDecoration(labelText: "Número/Apto")),
               TextField(controller: refC, decoration: const InputDecoration(labelText: "Referência")),
