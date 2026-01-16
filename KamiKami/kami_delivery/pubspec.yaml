@@ -28,6 +28,11 @@ dependencies:
   google_places_flutter: ^2.0.8
   location: ^5.0.3
 
+  # 🔥 FIREBASE
+  firebase_core: ^2.30.0
+  firebase_auth: ^4.17.0
+  cloud_firestore: ^4.15.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

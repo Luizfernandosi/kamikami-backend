@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "388632511078",
+    "project_id": "kamikami-af5fe",
+    "storage_bucket": "kamikami-af5fe.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:388632511078:android:b62e5209983818f688a3a7",
+        "android_client_info": {
+          "package_name": "com.example.kami_delivery"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCkOkTmAtczkC1wCvAfLAtkdaIFt2skXM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

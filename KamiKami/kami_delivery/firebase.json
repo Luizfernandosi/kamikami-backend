@@ -12,5 +12,28 @@
         "destination": "/index.html"
       }
     ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "kamikami-af5fe",
+          "appId": "1:388632511078:android:b62e5209983818f688a3a7",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "kamikami-af5fe",
+          "configurations": {
+            "android": "1:388632511078:android:b62e5209983818f688a3a7",
+            "ios": "1:388632511078:ios:0670dca8310b412988a3a7",
+            "macos": "1:388632511078:ios:0670dca8310b412988a3a7",
+            "web": "1:388632511078:web:cc14820e8a6a33b888a3a7",
+            "windows": "1:388632511078:web:bdf56aca6e70aa8e88a3a7"
+          }
+        }
+      }
+    }
   }
 }
