@@ -1,99 +1,111 @@
 import firebase_admin
-from firebase_admin import credentials
-
-cred = credentials.Certificate("kamikami-af5fe-firebase-adminsdk-fbsvc-f14d81f29a.json")
-firebase_admin.initialize_app(cred)
-
-
-from fastapi import FastAPI, Request, HTTPException
+from firebase_admin import credentials, firestore
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import mercadopago
-import os
 import uvicorn
-from datetime import datetime
+import os
+import json
 
 app = FastAPI()
 
+# 1. Configuração de CORS (Essencial para Flutter Web)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SDK = mercadopago.SDK("TEST-819053197713657-011222-194aeab4af602ac4782b61b245651ce7-181707904")
+# 2. Inicializar Firebase de forma segura
+# Se o arquivo JSON não estiver na raiz, o servidor avisará no log
+try:
+    nome_arquivo_json = "kamikami-af5fe-firebase-adminsdk-fbsvc-f14d81f29a.json"
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(nome_arquivo_json)
+        firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    print("✅ Firebase conectado com sucesso!")
+except Exception as e:
+    print(f"❌ Erro ao iniciar Firebase: {e}")
 
-# BANCO DE DADOS (Simulado - Para persistência real, use Firebase Firestore)
-db_cardapio = {
-    "frete": 7.00,
-    "produtos": [
-        {"id": 1, "nome": "01 - CARNE", "preco": 29.90, "emoji": "🥩", "desc": "Carne+Legumes+Verduras Tradicionais", "ativo": True},
-        {"id": 2, "nome": "02 - MISTO", "preco": 28.90, "emoji": "🍱", "desc": "Carne e Frango+Legumes+Verduras", "ativo": True},
-        {"id": 3, "nome": "03 - FRANGO", "preco": 27.90, "emoji": "🍗", "desc": "Frango+Legumes+Verduras Tradicionais", "ativo": True},
-        {"id": 5, "nome": "05 - CAMARÃO", "preco": 34.90, "emoji": "🍤", "desc": "Camarão+Legumes+Verduras Tradicionais", "ativo": True},
-    ]
-}
+# 3. Configurar Mercado Pago
+sdk = mercadopago.SDK("APP_USR-819053197713657-011222-74cd3d9202216f9f85ec2c1cbb5e50f2-181707904QUI")
 
-db_pedidos = []
-db_usuarios = [] 
-db_cupons = [{"codigo": "KAMI10", "tipo": "porcentagem", "valor": 10}]
-
-@app.get('/cardapio')
-async def obter_cardapio(): return db_cardapio
-
-@app.post('/buscar_usuario')
-async def buscar_usuario(request: Request):
-    dados = await request.json()
-    email = dados.get("email", "").lower()
-    for user in db_usuarios:
-        if user['email'] == email:
-            return {"status": "encontrado", "nome": user['nome'], "cep": user.get('cep', '')}
-    return {"status": "nao_encontrado"}
-
+# --- ROTA DE REGISTRO ---
 @app.post('/registrar_usuario')
 async def registrar_usuario(request: Request):
-    dados = await request.json()
-    db_usuarios.append(dados)
-    return {"status": "sucesso"}
+    try:
+        dados = await request.json()
+        telefone = str(dados.get('telefone', '')).strip()
+        
+        if not telefone:
+            return {"status": "erro", "mensagem": "Telefone é obrigatório"}
 
-@app.post('/validar_cupom')
-async def validar_cupom(request: Request):
-    dados = await request.json()
-    codigo = dados.get("codigo", "").upper()
-    for c in db_cupons:
-        if c["codigo"] == codigo:
-            return {"status": "valido", "tipo": c["tipo"], "valor": c["valor"]}
-    return {"status": "invalido"}
+        user_ref = db.collection('usuarios').document(telefone)
+        if user_ref.get().exists:
+            return {"status": "erro", "mensagem": "Este telefone já está cadastrado!"}
+        
+        user_data = {
+            "nome": dados.get('nome'),
+            "telefone": telefone,
+            "senha": str(dados.get('senha')),
+            "criado_em": firestore.SERVER_TIMESTAMP
+        }
+        
+        user_ref.set(user_data)
+        return {"status": "sucesso", "usuario": user_data}
+    except Exception as e:
+        return {"status": "erro", "mensagem": f"Erro interno: {str(e)}"}
 
-@app.get('/admin/clientes')
-async def listar_clientes(): return db_usuarios
+# --- ROTA DE LOGIN ---
+@app.post('/login_usuario')
+async def login_usuario(request: Request):
+    try:
+        dados = await request.json()
+        telefone = str(dados.get('telefone', '')).strip()
+        senha = str(dados.get('senha', ''))
+        
+        user_ref = db.collection('usuarios').document(telefone).get()
+        
+        if user_ref.exists:
+            user_data = user_ref.to_dict()
+            if str(user_data.get('senha')) == senha:
+                return {"status": "sucesso", "usuario": user_data}
+            else:
+                return {"status": "erro", "mensagem": "Senha incorreta!"}
+        
+        return {"status": "erro", "mensagem": "Telefone não cadastrado!"}
+    except Exception as e:
+        return {"status": "erro", "mensagem": "Erro de conexão com o banco de dados"}
 
-@app.get('/admin/cupons')
-async def listar_cupons(): return db_cupons
+# --- ROTA MERCADO PAGO ---
+@app.post('/criar_pagamento')
+async def criar_pagamento(request: Request):
+    try:
+        dados = await request.json()
+        preference_data = {
+            "items": [
+                {
+                    "title": "Pedido KamiKami Yakissoba",
+                    "quantity": 1,
+                    "unit_price": float(dados.get('valor')),
+                }
+            ],
+            "back_urls": {
+                "success": "https://kamikami-delivery.web.app",
+                "failure": "https://kamikami-delivery.web.app",
+            },
+            "auto_return": "approved",
+        }
+        
+        result = sdk.preference().create(preference_data)
+        return {"link": result["response"]["init_point"]}
+    except Exception as e:
+        return {"status": "erro", "mensagem": str(e)}
 
-@app.post('/admin/criar_cupom')
-async def criar_cupom(request: Request):
-    dados = await request.json()
-    db_cupons.append(dados["cupom"])
-    return {"status": "sucesso"}
-
-@app.post('/checkout')
-async def checkout(request: Request):
-    dados = await request.json()
-    novo_pedido = {
-        "id": len(db_pedidos) + 1,
-        "itens": dados['itens'],
-        "endereco": dados['endereco'],
-        "total": sum(i['preco'] for i in dados['itens']) + float(dados['frete']),
-        "status": "Pendente"
-    }
-    db_pedidos.insert(0, novo_pedido)
-    preference_data = {"items": [{"title": i['nome'], "quantity": 1, "unit_price": float(i['preco']), "currency_id": "BRL"} for i in dados['itens']]}
-    result = SDK.preference().create(preference_data)
-    return {"qr_code_url": result["response"].get("init_point")}
-
-@app.get('/listar_pedidos')
-async def listar_pedidos(): return db_pedidos
-
+# Início do Servidor (Configuração específica para o Render)
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
